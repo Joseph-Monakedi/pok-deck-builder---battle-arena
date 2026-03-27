@@ -1,0 +1,5 @@
+{
+  "name": "PokéDeck Builder & Battle Arena",
+  "description": "A high-performance Pokémon deck builder and real-time multiplayer battle arena using PokéAPI and Socket.io.",
+  "requestFramePermissions": []
+}
