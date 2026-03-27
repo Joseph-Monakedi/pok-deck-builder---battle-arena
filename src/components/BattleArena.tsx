@@ -15,14 +15,12 @@ interface BattleArenaProps {
 
 export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAttack, onSwitch, onForfeit }) => {
   const [showSwitch, setShowSwitch] = React.useState(false);
+  const [autoBattle, setAutoBattle] = React.useState(false);
   const playerIds = Object.keys(state.players);
   const opponentId = playerIds.find(id => id !== socketId)!;
   
   const player = state.players[socketId];
   const opponent = state.players[opponentId];
-
-  const activePlayerPoke = player.deck[player.activePokemonIndex];
-  const activeOpponentPoke = opponent.deck[opponent.activePokemonIndex];
 
   const isMyTurn = state.turn === socketId && state.status === 'active';
   const isSpectator = !playerIds.includes(socketId);
@@ -37,6 +35,19 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
   const displayOpponent = isSpectator ? p2 : opponent;
   const displayActivePlayerPoke = displayPlayer.deck[displayPlayer.activePokemonIndex];
   const displayActiveOpponentPoke = displayOpponent.deck[displayOpponent.activePokemonIndex];
+
+  // Auto-battle logic
+  React.useEffect(() => {
+    if (autoBattle && isMyTurn && !isSpectator) {
+      const timer = setTimeout(() => {
+        const activePoke = player.deck[player.activePokemonIndex];
+        // Simple AI: Pick a random move
+        const randomMove = activePoke.moves[Math.floor(Math.random() * activePoke.moves.length)];
+        onAttack(randomMove);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [autoBattle, isMyTurn, isSpectator, player, onAttack]);
 
   return (
     <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col font-sans overflow-hidden">
@@ -54,6 +65,18 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
               Spectating
             </div>
           )}
+          {!isSpectator && state.status === 'active' && (
+            <button 
+              onClick={() => setAutoBattle(!autoBattle)}
+              className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2",
+                autoBattle ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-500 hover:text-slate-300"
+              )}
+            >
+              <Zap size={10} className={autoBattle ? "animate-pulse" : ""} />
+              Auto Battle: {autoBattle ? "ON" : "OFF"}
+            </button>
+          )}
         </div>
         <button onClick={onForfeit} className="text-slate-500 hover:text-red-500 transition-colors flex items-center gap-2 text-sm">
           <LogOut size={16} /> {state.status === 'finished' ? 'Exit' : 'Forfeit'}
@@ -65,20 +88,36 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
         {/* Opponent Side */}
         <div className="flex flex-col items-center lg:items-end gap-4 w-full max-w-md">
           <div className="w-full bg-slate-900/50 border border-slate-800 p-4 rounded-2xl">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-bold capitalize">{displayActiveOpponentPoke.name}</h3>
-              <div className="flex gap-1">
-                {displayOpponent.deck.map((p, i) => (
-                  <div 
-                    key={i} 
-                    className={cn(
-                      "w-3 h-3 rounded-full border",
-                      p.isFainted ? "bg-red-900 border-red-700" : 
-                      displayOpponent.seenPokemonIndices.includes(i) ? "bg-green-500 border-green-400" : "bg-slate-700 border-slate-600"
-                    )}
-                    title={displayOpponent.seenPokemonIndices.includes(i) ? p.name : "Unknown"}
-                  />
-                ))}
+            <div className="flex justify-between items-center mb-3">
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Opponent: {displayOpponent.name}</span>
+                </div>
+                <h3 className="text-xl font-black capitalize text-white tracking-tight">{displayActiveOpponentPoke.name}</h3>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <span className="text-[8px] font-bold text-slate-600 uppercase tracking-widest">Team Status</span>
+                <div className="flex gap-1.5">
+                  {displayOpponent.deck.map((p, i) => (
+                    <div 
+                      key={i} 
+                      className={cn(
+                        "w-8 h-8 rounded-xl border flex items-center justify-center p-1 transition-all relative overflow-hidden",
+                        p.isFainted ? "bg-red-950/40 border-red-900 grayscale opacity-40" : 
+                        displayOpponent.seenPokemonIndices.includes(i) ? "bg-blue-500/10 border-blue-500/50" : "bg-slate-800 border-slate-700"
+                      )}
+                      title={displayOpponent.seenPokemonIndices.includes(i) ? p.name : "Unknown"}
+                    >
+                      {displayOpponent.seenPokemonIndices.includes(i) ? (
+                        <img src={p.image} alt={p.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="w-3 h-3 rounded-full bg-slate-700 border border-slate-600" />
+                      )}
+                      {p.isFainted && <div className="absolute inset-0 flex items-center justify-center text-[6px] font-bold text-red-500 bg-red-950/20">X</div>}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="h-3 bg-slate-800 rounded-full overflow-hidden mb-1">
@@ -140,17 +179,22 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
 
           <div className="w-full bg-slate-900/50 border border-slate-800 p-4 rounded-2xl">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-bold capitalize">{displayActivePlayerPoke.name}</h3>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Trainer: {displayPlayer.name}</span>
+                <h3 className="text-lg font-bold capitalize">{displayActivePlayerPoke.name}</h3>
+              </div>
               <div className="flex gap-1">
                 {displayPlayer.deck.map((p, i) => (
                   <div 
                     key={i} 
                     className={cn(
-                      "w-3 h-3 rounded-full border",
-                      p.isFainted ? "bg-red-900 border-red-700" : 
-                      i === displayPlayer.activePokemonIndex ? "bg-blue-500 border-blue-400" : "bg-green-500 border-green-400"
+                      "w-6 h-6 rounded-lg border flex items-center justify-center p-0.5 transition-all overflow-hidden",
+                      p.isFainted ? "bg-red-900/20 border-red-700 grayscale opacity-50" : 
+                      i === displayPlayer.activePokemonIndex ? "bg-blue-500/20 border-blue-500" : "bg-green-500/10 border-green-500/50"
                     )}
-                  />
+                  >
+                    <img src={p.image} alt={p.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                  </div>
                 ))}
               </div>
             </div>

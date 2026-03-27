@@ -45,6 +45,7 @@ async function startServer() {
   const rooms = new Map();
   const queue: { id: string; name: string; deck: any[] }[] = [];
   const onlinePlayers = new Map<string, { id: string; name: string; status: 'idle' | 'searching' | 'battling' }>();
+  const pendingChallenges = new Map<string, { challengerId: string; challengerDeck: any[] }>();
 
   function broadcastLobbyState() {
     const lobbyState = {
@@ -124,6 +125,76 @@ async function startServer() {
           broadcastLobbyState();
         }
       }
+    });
+
+    socket.on('challenge_player', ({ targetId, deck }) => {
+      const challenger = onlinePlayers.get(socket.id);
+      const target = onlinePlayers.get(targetId);
+      
+      if (challenger && target && target.status === 'idle') {
+        pendingChallenges.set(targetId, { challengerId: socket.id, challengerDeck: deck });
+        io.to(targetId).emit('challenge_received', { 
+          fromId: socket.id, 
+          fromName: challenger.name 
+        });
+      }
+    });
+
+    socket.on('accept_challenge', ({ fromId, deck }) => {
+      const challenge = pendingChallenges.get(socket.id);
+      if (!challenge || challenge.challengerId !== fromId) return;
+
+      const challenger = onlinePlayers.get(fromId);
+      const challenged = onlinePlayers.get(socket.id);
+
+      if (challenger && challenged) {
+        const roomId = `challenge_${fromId}_${socket.id}`;
+        const challengerSocket = io.sockets.sockets.get(fromId);
+        
+        if (challengerSocket) {
+          challengerSocket.join(roomId);
+          socket.join(roomId);
+
+          challenger.status = 'battling';
+          challenged.status = 'battling';
+
+          const battleState = {
+            roomId,
+            players: {
+              [fromId]: {
+                id: fromId,
+                name: challenger.name,
+                deck: challenge.challengerDeck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
+                activePokemonIndex: 0,
+                isReady: true,
+                seenPokemonIndices: [0],
+              },
+              [socket.id]: {
+                id: socket.id,
+                name: challenged.name,
+                deck: deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
+                activePokemonIndex: 0,
+                isReady: true,
+                seenPokemonIndices: [0],
+              },
+            },
+            turn: fromId,
+            log: ['Challenge Battle started!'],
+            status: 'active',
+            spectators: [],
+          };
+
+          rooms.set(roomId, battleState);
+          io.to(roomId).emit('battle_start', battleState);
+          pendingChallenges.delete(socket.id);
+          broadcastLobbyState();
+        }
+      }
+    });
+
+    socket.on('decline_challenge', (fromId) => {
+      pendingChallenges.delete(socket.id);
+      io.to(fromId).emit('challenge_declined');
     });
 
     socket.on('join_cpu_battle', ({ name, deck }) => {
@@ -331,10 +402,9 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-  app.use(express.static(__dirname));
-
-  app.get('*', (_, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
   }
 

@@ -22,6 +22,7 @@ export default function App() {
   const [lobbyState, setLobbyState] = useState<LobbyState>({ onlinePlayers: [], activeMatches: [] });
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('poke-player-name') || '');
   const [battleState, setBattleState] = useState<BattleState | null>(null);
+  const [challengeRequest, setChallengeRequest] = useState<{ fromId: string; fromName: string } | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [globalSearchResult, setGlobalSearchResult] = useState<PokemonSummary | null>(null);
   const fetchedOffsets = useRef<Set<number>>(new Set());
@@ -86,6 +87,11 @@ export default function App() {
       setBattleState(state);
       setIsSearching(false);
       setIsLobbyOpen(false);
+      setChallengeRequest(null);
+    });
+
+    newSocket.on('challenge_received', (data: { fromId: string; fromName: string }) => {
+      setChallengeRequest(data);
     });
 
     newSocket.on('battle_update', (state: BattleState) => {
@@ -186,6 +192,18 @@ export default function App() {
   const handleSwitch = (index: number) => {
     if (!battleState || !socket) return;
     socket.emit('switch_pokemon', { roomId: battleState.roomId, index });
+  };
+
+  const acceptChallenge = () => {
+    if (!socket || !challengeRequest) return;
+    socket.emit('accept_challenge', { fromId: challengeRequest.fromId, deck });
+    setChallengeRequest(null);
+  };
+
+  const declineChallenge = () => {
+    if (!socket || !challengeRequest) return;
+    socket.emit('decline_challenge', { fromId: challengeRequest.fromId });
+    setChallengeRequest(null);
   };
 
   const filteredPokemon = pokemonList.filter(p => 
@@ -298,15 +316,20 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Your Trainer Name</label>
-                  <input 
-                    type="text" 
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="Enter your name..."
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3 px-4 focus:outline-none focus:border-blue-600 transition-colors"
-                  />
+                <div className="p-4 bg-slate-800/30 border border-slate-800 rounded-2xl flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-600/20 border border-blue-600/40 rounded-xl flex items-center justify-center">
+                    <Trophy className="text-blue-400" size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Trainer Profile</label>
+                    <input 
+                      type="text" 
+                      value={playerName}
+                      onChange={(e) => setPlayerName(e.target.value)}
+                      placeholder="Enter trainer name..."
+                      className="w-full bg-transparent border-none p-0 text-lg font-bold focus:outline-none focus:ring-0 placeholder:text-slate-700"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -343,8 +366,10 @@ export default function App() {
                       Online Players
                       <span className="bg-slate-800 px-2 py-0.5 rounded-full text-[10px]">{lobbyState.onlinePlayers.length}</span>
                     </h3>
-                    <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-2">
-                      {lobbyState.onlinePlayers.map(player => (
+                    <div className="max-h-48 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                      {lobbyState.onlinePlayers.length === 0 ? (
+                        <p className="text-xs text-slate-600 italic">No players online</p>
+                      ) : lobbyState.onlinePlayers.map(player => (
                         <div key={player.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800">
                           <div className="flex items-center gap-2">
                             <div className={`w-2 h-2 rounded-full ${
@@ -353,7 +378,17 @@ export default function App() {
                             }`} />
                             <span className="text-sm font-medium">{player.name}</span>
                           </div>
-                          <span className="text-[10px] text-slate-500 uppercase">{player.status}</span>
+                          <div className="flex items-center gap-2">
+                            {player.id !== socket?.id && player.status === 'idle' && (
+                              <button 
+                                onClick={() => socket?.emit('challenge_player', { targetId: player.id, deck })}
+                                className="text-[10px] bg-blue-600 hover:bg-blue-500 px-2 py-1 rounded transition-colors"
+                              >
+                                Challenge
+                              </button>
+                            )}
+                            <span className="text-[10px] text-slate-500 uppercase">{player.status}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -361,16 +396,16 @@ export default function App() {
 
                   <div>
                     <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">Active Matches</h3>
-                    <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                    <div className="max-h-48 overflow-y-auto space-y-2 custom-scrollbar pr-2">
                       {lobbyState.activeMatches.length === 0 ? (
                         <p className="text-xs text-slate-600 italic">No active matches</p>
                       ) : (
                         lobbyState.activeMatches.map(match => (
                           <div key={match.roomId} className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800">
                             <div className="text-xs">
-                              <span className="text-blue-400">{match.players[0]}</span>
+                              <span className="text-blue-400">{match.p1Name}</span>
                               <span className="mx-1 text-slate-600">vs</span>
-                              <span className="text-red-400">{match.players[1]}</span>
+                              <span className="text-red-400">{match.p2Name}</span>
                             </div>
                             <button 
                               onClick={() => spectateMatch(match.roomId)}
@@ -404,6 +439,42 @@ export default function App() {
             onSwitch={handleSwitch}
             onForfeit={() => setBattleState(null)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Challenge Modal */}
+      <AnimatePresence>
+        {challengeRequest && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-6 right-6 z-[120] bg-slate-900 border border-blue-600 p-6 rounded-2xl shadow-2xl max-w-xs w-full"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
+                <Swords className="text-white" size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm">Challenge Received!</h3>
+                <p className="text-xs text-slate-400">{challengeRequest.fromName} wants to battle!</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={acceptChallenge}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 py-2 rounded-lg text-xs font-bold transition-colors"
+              >
+                Accept
+              </button>
+              <button 
+                onClick={declineChallenge}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg text-xs font-bold transition-colors"
+              >
+                Decline
+              </button>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
