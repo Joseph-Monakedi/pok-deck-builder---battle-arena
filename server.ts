@@ -43,60 +43,95 @@ async function startServer() {
 
   // Battle Logic State
   const rooms = new Map();
-  const queue: string[] = [];
+  const queue: { id: string; name: string; deck: any[] }[] = [];
+  const onlinePlayers = new Map<string, { id: string; name: string; status: 'idle' | 'searching' | 'battling' }>();
+
+  function broadcastLobbyState() {
+    const lobbyState = {
+      onlinePlayers: Array.from(onlinePlayers.values()),
+      activeMatches: Array.from(rooms.values())
+        .filter(r => r.status === 'active')
+        .map(r => ({
+          roomId: r.roomId,
+          p1Name: r.players[Object.keys(r.players)[0]].name || 'Player 1',
+          p2Name: r.players[Object.keys(r.players)[1]].name || 'Player 2',
+        })),
+    };
+    io.emit('lobby_update', lobbyState);
+  }
 
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    socket.on('join_queue', (deck) => {
+    socket.on('join_lobby', (name) => {
+      onlinePlayers.set(socket.id, { id: socket.id, name: name || `Trainer ${socket.id.slice(0, 4)}`, status: 'idle' });
+      broadcastLobbyState();
+    });
+
+    socket.on('join_queue', ({ name, deck }) => {
       console.log('User joined queue:', socket.id);
-      queue.push(socket.id);
-      socket.data.deck = deck;
+      const player = onlinePlayers.get(socket.id);
+      if (player) player.status = 'searching';
+      
+      queue.push({ id: socket.id, name: name || player?.name || 'Trainer', deck });
+      broadcastLobbyState();
 
       if (queue.length >= 2) {
-        const p1Id = queue.shift()!;
-        const p2Id = queue.shift()!;
-        const roomId = `room_${p1Id}_${p2Id}`;
+        const p1 = queue.shift()!;
+        const p2 = queue.shift()!;
+        const roomId = `room_${p1.id}_${p2.id}`;
 
-        const p1Socket = io.sockets.sockets.get(p1Id);
-        const p2Socket = io.sockets.sockets.get(p2Id);
+        const p1Socket = io.sockets.sockets.get(p1.id);
+        const p2Socket = io.sockets.sockets.get(p2.id);
 
         if (p1Socket && p2Socket) {
           p1Socket.join(roomId);
           p2Socket.join(roomId);
 
+          const p1Data = onlinePlayers.get(p1.id);
+          const p2Data = onlinePlayers.get(p2.id);
+          if (p1Data) p1Data.status = 'battling';
+          if (p2Data) p2Data.status = 'battling';
+
           const battleState = {
             roomId,
             players: {
-              [p1Id]: {
-                id: p1Id,
-                deck: p1Socket.data.deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
+              [p1.id]: {
+                id: p1.id,
+                name: p1.name,
+                deck: p1.deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
                 activePokemonIndex: 0,
                 isReady: true,
-                isAuto: false,
+                seenPokemonIndices: [0],
               },
-              [p2Id]: {
-                id: p2Id,
-                deck: p2Socket.data.deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
+              [p2.id]: {
+                id: p2.id,
+                name: p2.name,
+                deck: p2.deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
                 activePokemonIndex: 0,
                 isReady: true,
-                isAuto: false,
+                seenPokemonIndices: [0],
               },
             },
-            turn: p1Id,
+            turn: p1.id,
             log: ['Battle started!'],
             status: 'active',
+            spectators: [],
           };
 
           rooms.set(roomId, battleState);
           io.to(roomId).emit('battle_start', battleState);
+          broadcastLobbyState();
         }
       }
     });
 
-    socket.on('join_cpu_battle', (deck) => {
+    socket.on('join_cpu_battle', ({ name, deck }) => {
       const roomId = `cpu_room_${socket.id}`;
       socket.join(roomId);
+
+      const player = onlinePlayers.get(socket.id);
+      if (player) player.status = 'battling';
 
       const cpuDeck = deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false }));
       
@@ -105,48 +140,39 @@ async function startServer() {
         players: {
           [socket.id]: {
             id: socket.id,
+            name: name || player?.name || 'Trainer',
             deck: deck.map((p: any) => ({ ...p, currentHp: p.stats.hp, maxHp: p.stats.hp, isFainted: false })),
             activePokemonIndex: 0,
             isReady: true,
-            isAuto: false,
+            seenPokemonIndices: [0],
           },
           'cpu': {
             id: 'cpu',
+            name: 'CPU Trainer',
             deck: cpuDeck,
             activePokemonIndex: 0,
             isReady: true,
-            isAuto: true,
+            seenPokemonIndices: [0],
           },
         },
         turn: socket.id,
         log: ['Battle against CPU started!'],
         status: 'active',
+        spectators: [],
       };
 
       rooms.set(roomId, battleState);
       socket.emit('battle_start', battleState);
+      broadcastLobbyState();
     });
 
-    socket.on('toggle_auto', ({ roomId }) => {
+    socket.on('spectate_match', (roomId) => {
       const state = rooms.get(roomId);
-      if (!state || !state.players[socket.id]) return;
-      
-      state.players[socket.id].isAuto = !state.players[socket.id].isAuto;
-      io.to(roomId).emit('battle_update', state);
-
-      // If it's their turn and they just turned on auto, trigger attack
-      if (state.players[socket.id].isAuto && state.turn === socket.id && state.status === 'active') {
-        setTimeout(() => {
-          const playerIds = Object.keys(state.players);
-          const opponentId = playerIds.find(id => id !== socket.id)!;
-          const attacker = state.players[socket.id];
-          const move = attacker.deck[attacker.activePokemonIndex].moves[Math.floor(Math.random() * 4)];
-          processAttack(state, socket.id, opponentId, move);
-          io.to(roomId).emit('battle_update', state);
-          
-          // If next is CPU or Auto player, trigger them too
-          checkAndTriggerNextTurn(state, roomId);
-        }, 1000);
+      if (state && state.status === 'active') {
+        socket.join(roomId);
+        state.spectators.push(socket.id);
+        socket.emit('battle_start', state);
+        io.to(roomId).emit('battle_update', state);
       }
     });
 
@@ -158,33 +184,59 @@ async function startServer() {
       const opponentId = playerIds.find(id => id !== socket.id)!;
       
       processAttack(state, socket.id, opponentId, move);
-      io.to(roomId).emit('battle_update', state);
 
-      checkAndTriggerNextTurn(state, roomId);
-    });
-
-    function checkAndTriggerNextTurn(state: any, roomId: string) {
-      if (state.status !== 'active') return;
-      
-      const nextPlayerId = state.turn;
-      const nextPlayer = state.players[nextPlayerId];
-      
-      if (nextPlayer.isAuto || nextPlayerId === 'cpu') {
+      if (state.status === 'active' && opponentId === 'cpu') {
+        // CPU Turn
         setTimeout(() => {
           const currentState = rooms.get(roomId);
-          if (!currentState || currentState.turn !== nextPlayerId || currentState.status !== 'active') return;
-          
-          const opponentId = Object.keys(currentState.players).find(id => id !== nextPlayerId)!;
-          const attacker = currentState.players[nextPlayerId];
-          const randomMove = attacker.deck[attacker.activePokemonIndex].moves[Math.floor(Math.random() * 4)];
-          
-          processAttack(currentState, nextPlayerId, opponentId, randomMove);
-          io.to(roomId).emit('battle_update', currentState);
-          
-          checkAndTriggerNextTurn(currentState, roomId);
+          if (currentState && currentState.status === 'active' && currentState.turn === 'cpu') {
+            const cpu = currentState.players['cpu'];
+            const activePoke = cpu.deck[cpu.activePokemonIndex];
+            const randomMove = activePoke.moves[Math.floor(Math.random() * activePoke.moves.length)];
+            processAttack(currentState, 'cpu', socket.id, randomMove);
+            io.to(roomId).emit('battle_update', currentState);
+          }
         }, 1500);
       }
-    }
+
+      io.to(roomId).emit('battle_update', state);
+    });
+
+    socket.on('switch_pokemon', ({ roomId, index }) => {
+      const state = rooms.get(roomId);
+      if (!state || state.turn !== socket.id || state.status !== 'active') return;
+
+      const player = state.players[socket.id];
+      if (index === player.activePokemonIndex || player.deck[index].isFainted) return;
+
+      const oldPoke = player.deck[player.activePokemonIndex];
+      const newPoke = player.deck[index];
+      
+      player.activePokemonIndex = index;
+      if (!player.seenPokemonIndices.includes(index)) {
+        player.seenPokemonIndices.push(index);
+      }
+
+      state.log.unshift(`${player.name || 'Player'} withdrew ${oldPoke.name} and sent out ${newPoke.name}!`);
+      
+      const opponentId = Object.keys(state.players).find(id => id !== socket.id)!;
+      state.turn = opponentId;
+
+      if (state.status === 'active' && opponentId === 'cpu') {
+        setTimeout(() => {
+          const currentState = rooms.get(roomId);
+          if (currentState && currentState.status === 'active' && currentState.turn === 'cpu') {
+            const cpu = currentState.players['cpu'];
+            const activePoke = cpu.deck[cpu.activePokemonIndex];
+            const randomMove = activePoke.moves[Math.floor(Math.random() * activePoke.moves.length)];
+            processAttack(currentState, 'cpu', socket.id, randomMove);
+            io.to(roomId).emit('battle_update', currentState);
+          }
+        }, 1500);
+      }
+
+      io.to(roomId).emit('battle_update', state);
+    });
 
     function processAttack(state: any, attackerId: string, opponentId: string, move: any) {
       const attacker = state.players[attackerId];
@@ -195,15 +247,14 @@ async function startServer() {
 
       // Damage calculation with type effectiveness and move power
       let multiplier = 1;
-      const moveType = move.type;
+      const moveType = move.type.toLowerCase();
       opponentPoke.types.forEach((defType: string) => {
-        if (TYPE_EFFECTIVENESS[moveType] && TYPE_EFFECTIVENESS[moveType][defType] !== undefined) {
-          multiplier *= TYPE_EFFECTIVENESS[moveType][defType];
+        if (TYPE_EFFECTIVENESS[moveType] && TYPE_EFFECTIVENESS[moveType][defType.toLowerCase()] !== undefined) {
+          multiplier *= TYPE_EFFECTIVENESS[moveType][defType.toLowerCase()];
         }
       });
 
-      const movePower = move.power || 40;
-      const baseDamage = (attackerPoke.stats.attack / opponentPoke.stats.defense) * (movePower / 5);
+      const baseDamage = (attackerPoke.stats.attack / opponentPoke.stats.defense) * (move.power / 5);
       const randomFactor = Math.random() * 5;
       const damage = Math.max(5, Math.floor((baseDamage + randomFactor) * multiplier));
       
@@ -224,10 +275,20 @@ async function startServer() {
         if (allFainted) {
           state.status = 'finished';
           state.winner = attackerId;
-          state.log.unshift(`${attackerId === 'cpu' ? 'CPU' : 'Player'} wins the battle!`);
+          state.log.unshift(`${attacker.name || 'Player'} wins the battle!`);
+          
+          // Update player statuses
+          Object.keys(state.players).forEach(id => {
+            const p = onlinePlayers.get(id);
+            if (p) p.status = 'idle';
+          });
+          broadcastLobbyState();
         } else {
           const nextIndex = opponent.deck.findIndex((p: any) => !p.isFainted);
           opponent.activePokemonIndex = nextIndex;
+          if (!opponent.seenPokemonIndices.includes(nextIndex)) {
+            opponent.seenPokemonIndices.push(nextIndex);
+          }
           state.log.unshift(`${opponent.deck[nextIndex].name} entered the battle!`);
         }
       }
@@ -238,32 +299,44 @@ async function startServer() {
     }
 
     socket.on('disconnect', () => {
-      const qIndex = queue.indexOf(socket.id);
+      console.log('User disconnected:', socket.id);
+      const qIndex = queue.findIndex(q => q.id === socket.id);
       if (qIndex > -1) queue.splice(qIndex, 1);
       
+      onlinePlayers.delete(socket.id);
+      broadcastLobbyState();
+
       // Handle room cleanup/forfeit
       rooms.forEach((state, roomId) => {
         if (state.players[socket.id]) {
           io.to(roomId).emit('player_disconnected');
           rooms.delete(roomId);
+          
+          // Update other player status
+          const otherId = Object.keys(state.players).find(id => id !== socket.id);
+          if (otherId) {
+            const p = onlinePlayers.get(otherId);
+            if (p) p.status = 'idle';
+          }
+          broadcastLobbyState();
         }
       });
     });
   });
 
   if (process.env.NODE_ENV !== 'production') {
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: 'spa',
-  });
-  app.use(vite.middlewares);
-} else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
   app.use(express.static(__dirname));
 
   app.get('*', (_, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
-  });
-}
+    });
+  }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running at http://localhost:${PORT}`);

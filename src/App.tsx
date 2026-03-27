@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { PokemonSummary, BattleState } from './types';
+import { PokemonSummary, BattleState, LobbyState, Move } from './types';
 import { fetchPokemonList, fetchPokemonByNameOrId } from './services/pokeApi';
 import { PokemonCard } from './components/PokemonCard';
 import { DeckSidebar } from './components/DeckSidebar';
@@ -19,6 +19,8 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [isLobbyOpen, setIsLobbyOpen] = useState(false);
+  const [lobbyState, setLobbyState] = useState<LobbyState>({ onlinePlayers: [], activeMatches: [] });
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem('poke-player-name') || '');
   const [battleState, setBattleState] = useState<BattleState | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [globalSearchResult, setGlobalSearchResult] = useState<PokemonSummary | null>(null);
@@ -63,8 +65,22 @@ export default function App() {
   }, [deck]);
 
   useEffect(() => {
+    localStorage.setItem('poke-player-name', playerName);
+  }, [playerName]);
+
+  useEffect(() => {
     const newSocket = io();
     setSocket(newSocket);
+
+    newSocket.on('connect', () => {
+      if (playerName) {
+        newSocket.emit('join_lobby', playerName);
+      }
+    });
+
+    newSocket.on('lobby_update', (state: LobbyState) => {
+      setLobbyState(state);
+    });
 
     newSocket.on('battle_start', (state: BattleState) => {
       setBattleState(state);
@@ -85,6 +101,12 @@ export default function App() {
       newSocket.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    if (socket && socket.connected && playerName) {
+      socket.emit('join_lobby', playerName);
+    }
+  }, [playerName, socket]);
 
   useEffect(() => {
     const searchGlobal = async () => {
@@ -140,24 +162,30 @@ export default function App() {
   };
 
   const joinOnlineQueue = () => {
-    if (!socket) return;
+    if (!socket || !playerName) return;
     setIsSearching(true);
-    socket.emit('join_queue', deck);
+    socket.emit('join_queue', { name: playerName, deck });
   };
 
   const battleCPU = () => {
-    if (!socket) return;
-    socket.emit('join_cpu_battle', deck);
+    if (!socket || !playerName) return;
+    socket.emit('join_cpu_battle', { name: playerName, deck });
   };
 
-  const handleAttack = (move: any) => {
+  const spectateMatch = (roomId: string) => {
+    if (!socket) return;
+    socket.emit('spectate_match', roomId);
+    setIsLobbyOpen(false);
+  };
+
+  const handleAttack = (move: Move) => {
     if (!battleState || !socket) return;
     socket.emit('attack', { roomId: battleState.roomId, move });
   };
 
-  const handleToggleAuto = () => {
+  const handleSwitch = (index: number) => {
     if (!battleState || !socket) return;
-    socket.emit('toggle_auto', { roomId: battleState.roomId });
+    socket.emit('switch_pokemon', { roomId: battleState.roomId, index });
   };
 
   const filteredPokemon = pokemonList.filter(p => 
@@ -269,35 +297,93 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="space-y-4">
-                <button 
-                  onClick={joinOnlineQueue}
-                  disabled={isSearching}
-                  className="w-full p-6 rounded-2xl bg-blue-600 hover:bg-blue-500 transition-all flex flex-col items-center gap-2 group"
-                >
-                  <Swords size={32} className="group-hover:scale-110 transition-transform" />
-                  <div className="text-center">
-                    <div className="font-bold text-lg">Find Match (Online)</div>
-                    <div className="text-xs text-blue-200">Battle against other trainers</div>
-                  </div>
-                  {isSearching && (
-                    <div className="mt-2 flex items-center gap-2 text-xs">
-                      <Loader2 className="animate-spin" size={12} />
-                      Searching for opponent...
-                    </div>
-                  )}
-                </button>
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Your Trainer Name</label>
+                  <input 
+                    type="text" 
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Enter your name..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl py-3 px-4 focus:outline-none focus:border-blue-600 transition-colors"
+                  />
+                </div>
 
-                <button 
-                  onClick={battleCPU}
-                  className="w-full p-6 rounded-2xl bg-slate-800 hover:bg-slate-700 transition-all flex flex-col items-center gap-2 group"
-                >
-                  <Zap size={32} className="text-yellow-500 group-hover:scale-110 transition-transform" />
-                  <div className="text-center">
-                    <div className="font-bold text-lg">Battle CPU</div>
-                    <div className="text-xs text-slate-400">Practice against the computer</div>
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={joinOnlineQueue}
+                    disabled={isSearching || !playerName || deck.length === 0}
+                    className="p-4 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex flex-col items-center gap-2 group"
+                  >
+                    <Swords size={24} className="group-hover:scale-110 transition-transform" />
+                    <div className="text-center">
+                      <div className="font-bold text-sm">Find Match</div>
+                      {isSearching && (
+                        <div className="mt-1 flex items-center gap-1 text-[10px]">
+                          <Loader2 className="animate-spin" size={10} />
+                          Searching...
+                        </div>
+                      )}
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={battleCPU}
+                    disabled={!playerName || deck.length === 0}
+                    className="p-4 rounded-2xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex flex-col items-center gap-2 group"
+                  >
+                    <Zap size={24} className="text-yellow-500 group-hover:scale-110 transition-transform" />
+                    <div className="font-bold text-sm">Battle CPU</div>
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 flex items-center justify-between">
+                      Online Players
+                      <span className="bg-slate-800 px-2 py-0.5 rounded-full text-[10px]">{lobbyState.onlinePlayers.length}</span>
+                    </h3>
+                    <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                      {lobbyState.onlinePlayers.map(player => (
+                        <div key={player.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                              player.status === 'battling' ? 'bg-red-500' : 
+                              player.status === 'searching' ? 'bg-yellow-500' : 'bg-green-500'
+                            }`} />
+                            <span className="text-sm font-medium">{player.name}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 uppercase">{player.status}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </button>
+
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-500 uppercase mb-2">Active Matches</h3>
+                    <div className="max-h-32 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                      {lobbyState.activeMatches.length === 0 ? (
+                        <p className="text-xs text-slate-600 italic">No active matches</p>
+                      ) : (
+                        lobbyState.activeMatches.map(match => (
+                          <div key={match.roomId} className="flex items-center justify-between p-2 rounded-lg bg-slate-800/50 border border-slate-800">
+                            <div className="text-xs">
+                              <span className="text-blue-400">{match.players[0]}</span>
+                              <span className="mx-1 text-slate-600">vs</span>
+                              <span className="text-red-400">{match.players[1]}</span>
+                            </div>
+                            <button 
+                              onClick={() => spectateMatch(match.roomId)}
+                              className="text-[10px] bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded transition-colors"
+                            >
+                              Spectate
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <p className="mt-6 text-center text-xs text-slate-500">
@@ -315,7 +401,7 @@ export default function App() {
             state={battleState} 
             socketId={socket.id || ''} 
             onAttack={handleAttack}
-            onToggleAuto={handleToggleAuto}
+            onSwitch={handleSwitch}
             onForfeit={() => setBattleState(null)}
           />
         )}

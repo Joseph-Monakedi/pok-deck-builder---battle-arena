@@ -45,10 +45,11 @@ export interface BattlePokemon extends PokemonSummary {
 
 export interface Player {
   id: string;
+  name?: string;
   deck: BattlePokemon[];
   activePokemonIndex: number;
   isReady: boolean;
-  isAuto: boolean;
+  seenPokemonIndices: number[]; // Indices of pokemon that have been active
 }
 
 export interface BattleState {
@@ -58,4 +59,10 @@ export interface BattleState {
   log: string[];
   status: 'waiting' | 'active' | 'finished';
   winner?: string;
+  spectators: string[];
+}
+
+export interface LobbyState {
+  onlinePlayers: { id: string; name: string; status: 'idle' | 'searching' | 'battling' }[];
+  activeMatches: { roomId: string; p1Name: string; p2Name: string }[];
 }

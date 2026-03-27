@@ -9,11 +9,12 @@ interface BattleArenaProps {
   state: BattleState;
   socketId: string;
   onAttack: (move: any) => void;
-  onToggleAuto: () => void;
+  onSwitch: (index: number) => void;
   onForfeit: () => void;
 }
 
-export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAttack, onToggleAuto, onForfeit }) => {
+export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAttack, onSwitch, onForfeit }) => {
+  const [showSwitch, setShowSwitch] = React.useState(false);
   const playerIds = Object.keys(state.players);
   const opponentId = playerIds.find(id => id !== socketId)!;
   
@@ -24,7 +25,18 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
   const activeOpponentPoke = opponent.deck[opponent.activePokemonIndex];
 
   const isMyTurn = state.turn === socketId && state.status === 'active';
-  const isAuto = player.isAuto;
+  const isSpectator = !playerIds.includes(socketId);
+
+  // If spectator, show p1 as player and p2 as opponent for consistency
+  const p1Id = playerIds[0];
+  const p2Id = playerIds[1];
+  const p1 = state.players[p1Id];
+  const p2 = state.players[p2Id];
+
+  const displayPlayer = isSpectator ? p1 : player;
+  const displayOpponent = isSpectator ? p2 : opponent;
+  const displayActivePlayerPoke = displayPlayer.deck[displayPlayer.activePokemonIndex];
+  const displayActiveOpponentPoke = displayOpponent.deck[displayOpponent.activePokemonIndex];
 
   return (
     <div className="fixed inset-0 z-[100] bg-slate-950 flex flex-col font-sans overflow-hidden">
@@ -32,22 +44,16 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
       <div className="glass-header px-6 py-4 flex justify-between items-center">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
-            <div className={cn("w-3 h-3 rounded-full", isMyTurn ? "bg-green-500 animate-pulse" : "bg-slate-700")} />
+            <div className={cn("w-3 h-3 rounded-full", state.turn === socketId ? "bg-green-500 animate-pulse" : "bg-slate-700")} />
             <span className="font-mono text-sm uppercase tracking-widest">
-              {state.status === 'finished' ? 'Battle Over' : (isMyTurn ? (isAuto ? "Auto Battling..." : "Your Turn") : (opponentId === 'cpu' ? "CPU Thinking..." : "Opponent's Turn"))}
+              {state.status === 'finished' ? 'Battle Over' : (isSpectator ? `Turn: ${state.players[state.turn].name}` : (isMyTurn ? "Your Turn" : "Opponent's Turn"))}
             </span>
           </div>
-          
-          <button 
-            onClick={onToggleAuto}
-            className={cn(
-              "flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter transition-all",
-              isAuto ? "bg-blue-600 text-white shadow-lg shadow-blue-600/40" : "bg-slate-800 text-slate-500 hover:text-slate-300"
-            )}
-          >
-            <Zap size={12} fill={isAuto ? "currentColor" : "none"} />
-            Auto Battle: {isAuto ? "ON" : "OFF"}
-          </button>
+          {isSpectator && (
+            <div className="px-3 py-1 bg-blue-600/20 border border-blue-600/40 rounded-full text-[10px] font-bold uppercase tracking-widest text-blue-400">
+              Spectating
+            </div>
+          )}
         </div>
         <button onClick={onForfeit} className="text-slate-500 hover:text-red-500 transition-colors flex items-center gap-2 text-sm">
           <LogOut size={16} /> {state.status === 'finished' ? 'Exit' : 'Forfeit'}
@@ -60,34 +66,49 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
         <div className="flex flex-col items-center lg:items-end gap-4 w-full max-w-md">
           <div className="w-full bg-slate-900/50 border border-slate-800 p-4 rounded-2xl">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-bold capitalize">{activeOpponentPoke.name} {opponentId === 'cpu' && <span className="text-[10px] bg-slate-800 px-1 rounded">CPU</span>}</h3>
-              <span className="font-mono text-xs text-slate-500">Lv. 50</span>
+              <h3 className="text-lg font-bold capitalize">{displayActiveOpponentPoke.name}</h3>
+              <div className="flex gap-1">
+                {displayOpponent.deck.map((p, i) => (
+                  <div 
+                    key={i} 
+                    className={cn(
+                      "w-3 h-3 rounded-full border",
+                      p.isFainted ? "bg-red-900 border-red-700" : 
+                      displayOpponent.seenPokemonIndices.includes(i) ? "bg-green-500 border-green-400" : "bg-slate-700 border-slate-600"
+                    )}
+                    title={displayOpponent.seenPokemonIndices.includes(i) ? p.name : "Unknown"}
+                  />
+                ))}
+              </div>
             </div>
             <div className="h-3 bg-slate-800 rounded-full overflow-hidden mb-1">
               <motion.div 
                 initial={{ width: '100%' }}
-                animate={{ width: `${(activeOpponentPoke.currentHp / activeOpponentPoke.maxHp) * 100}%` }}
+                animate={{ width: `${(displayActiveOpponentPoke.currentHp / displayActiveOpponentPoke.maxHp) * 100}%` }}
                 className={cn(
                   "h-full transition-all duration-500",
-                  (activeOpponentPoke.currentHp / activeOpponentPoke.maxHp) > 0.5 ? "bg-green-500" : 
-                  (activeOpponentPoke.currentHp / activeOpponentPoke.maxHp) > 0.2 ? "bg-yellow-500" : "bg-red-500"
+                  (displayActiveOpponentPoke.currentHp / displayActiveOpponentPoke.maxHp) > 0.5 ? "bg-green-500" : 
+                  (displayActiveOpponentPoke.currentHp / displayActiveOpponentPoke.maxHp) > 0.2 ? "bg-yellow-500" : "bg-red-500"
                 )}
               />
             </div>
-            <div className="flex justify-end font-mono text-[10px] text-slate-400">
-              {activeOpponentPoke.currentHp} / {activeOpponentPoke.maxHp} HP
+            <div className="flex justify-between font-mono text-[10px] text-slate-400">
+              <div className="flex gap-2">
+                {displayActiveOpponentPoke.types.map(t => <TypeBadge key={t} type={t} className="scale-75 origin-left" />)}
+              </div>
+              <span>{displayActiveOpponentPoke.currentHp} / {displayActiveOpponentPoke.maxHp} HP</span>
             </div>
           </div>
           
           <motion.div 
-            key={activeOpponentPoke.id}
+            key={displayActiveOpponentPoke.id}
             initial={{ x: 100, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             className="relative"
           >
             <img 
-              src={activeOpponentPoke.image} 
-              alt={activeOpponentPoke.name} 
+              src={displayActiveOpponentPoke.image} 
+              alt={displayActiveOpponentPoke.name} 
               className="w-48 h-48 lg:w-64 lg:h-64 object-contain"
               referrerPolicy="no-referrer"
             />
@@ -104,14 +125,14 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
         {/* Player Side */}
         <div className="flex flex-col-reverse lg:flex-col items-center lg:items-start gap-4 w-full max-w-md">
           <motion.div 
-            key={activePlayerPoke.id}
+            key={displayActivePlayerPoke.id}
             initial={{ x: -100, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             className="relative"
           >
             <img 
-              src={activePlayerPoke.image} 
-              alt={activePlayerPoke.name} 
+              src={displayActivePlayerPoke.image} 
+              alt={displayActivePlayerPoke.name} 
               className="w-48 h-48 lg:w-64 lg:h-64 object-contain"
               referrerPolicy="no-referrer"
             />
@@ -119,22 +140,36 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
 
           <div className="w-full bg-slate-900/50 border border-slate-800 p-4 rounded-2xl">
             <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-bold capitalize">{activePlayerPoke.name}</h3>
-              <span className="font-mono text-xs text-slate-500">Lv. 50</span>
+              <h3 className="text-lg font-bold capitalize">{displayActivePlayerPoke.name}</h3>
+              <div className="flex gap-1">
+                {displayPlayer.deck.map((p, i) => (
+                  <div 
+                    key={i} 
+                    className={cn(
+                      "w-3 h-3 rounded-full border",
+                      p.isFainted ? "bg-red-900 border-red-700" : 
+                      i === displayPlayer.activePokemonIndex ? "bg-blue-500 border-blue-400" : "bg-green-500 border-green-400"
+                    )}
+                  />
+                ))}
+              </div>
             </div>
             <div className="h-3 bg-slate-800 rounded-full overflow-hidden mb-1">
               <motion.div 
                 initial={{ width: '100%' }}
-                animate={{ width: `${(activePlayerPoke.currentHp / activePlayerPoke.maxHp) * 100}%` }}
+                animate={{ width: `${(displayActivePlayerPoke.currentHp / displayActivePlayerPoke.maxHp) * 100}%` }}
                 className={cn(
                   "h-full transition-all duration-500",
-                  (activePlayerPoke.currentHp / activePlayerPoke.maxHp) > 0.5 ? "bg-green-500" : 
-                  (activePlayerPoke.currentHp / activePlayerPoke.maxHp) > 0.2 ? "bg-yellow-500" : "bg-red-500"
+                  (displayActivePlayerPoke.currentHp / displayActivePlayerPoke.maxHp) > 0.5 ? "bg-green-500" : 
+                  (displayActivePlayerPoke.currentHp / displayActivePlayerPoke.maxHp) > 0.2 ? "bg-yellow-500" : "bg-red-500"
                 )}
               />
             </div>
-            <div className="flex justify-end font-mono text-[10px] text-slate-400">
-              {activePlayerPoke.currentHp} / {activePlayerPoke.maxHp} HP
+            <div className="flex justify-between font-mono text-[10px] text-slate-400">
+              <div className="flex gap-2">
+                {displayActivePlayerPoke.types.map(t => <TypeBadge key={t} type={t} className="scale-75 origin-left" />)}
+              </div>
+              <span>{displayActivePlayerPoke.currentHp} / {displayActivePlayerPoke.maxHp} HP</span>
             </div>
           </div>
         </div>
@@ -142,21 +177,41 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
 
       {/* Controls & Log */}
       <div className="bg-slate-900 border-t border-slate-800 p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Deck Status */}
+        {/* Team Status / Switch */}
         <div className="hidden lg:block">
-          <h4 className="text-xs font-bold uppercase text-slate-500 mb-3">Your Team</h4>
-          <div className="flex gap-2">
-            {player.deck.map((p, i) => (
-              <div 
-                key={i} 
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="text-xs font-bold uppercase text-slate-500">Your Team</h4>
+            {!isSpectator && state.status === 'active' && (
+              <button 
+                onClick={() => setShowSwitch(!showSwitch)}
                 className={cn(
-                  "w-10 h-10 rounded-lg border flex items-center justify-center p-1 transition-all",
-                  p.isFainted ? "bg-slate-950 border-slate-800 grayscale" : 
-                  i === player.activePokemonIndex ? "bg-blue-600/20 border-blue-600" : "bg-slate-800 border-slate-700"
+                  "text-[10px] font-bold uppercase px-2 py-1 rounded transition-all",
+                  showSwitch ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-400 hover:text-slate-200"
+                )}
+              >
+                {showSwitch ? "Back to Moves" : "Switch Pokemon"}
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {displayPlayer.deck.map((p, i) => (
+              <button 
+                key={i} 
+                disabled={!showSwitch || p.isFainted || i === displayPlayer.activePokemonIndex || !isMyTurn}
+                onClick={() => {
+                  onSwitch(i);
+                  setShowSwitch(false);
+                }}
+                className={cn(
+                  "w-12 h-12 rounded-lg border flex items-center justify-center p-1 transition-all relative overflow-hidden",
+                  p.isFainted ? "bg-slate-950 border-slate-800 grayscale opacity-50" : 
+                  i === displayPlayer.activePokemonIndex ? "bg-blue-600/20 border-blue-600" : "bg-slate-800 border-slate-700",
+                  showSwitch && !p.isFainted && i !== displayPlayer.activePokemonIndex && isMyTurn ? "hover:border-blue-400 hover:scale-105 cursor-pointer" : ""
                 )}
               >
                 <img src={p.image} alt={p.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-              </div>
+                {p.isFainted && <div className="absolute inset-0 bg-red-900/20 flex items-center justify-center text-[8px] font-bold text-red-500 uppercase">Fainted</div>}
+              </button>
             ))}
           </div>
         </div>
@@ -168,32 +223,39 @@ export const BattleArena: React.FC<BattleArenaProps> = ({ state, socketId, onAtt
               <h2 className={cn("text-3xl font-bold mb-4", state.winner === socketId ? "text-green-500" : "text-red-500")}>
                 {state.winner === socketId ? "VICTORY!" : "DEFEAT"}
               </h2>
-              <button onClick={onForfeit} className="btn-primary w-full">Return to Deck Builder</button>
+              <button onClick={onForfeit} className="btn-primary w-full">Return to Lobby</button>
+            </div>
+          ) : isSpectator ? (
+            <div className="text-center p-6 border border-slate-800 rounded-2xl bg-slate-950/50">
+              <Zap size={24} className="mx-auto mb-2 text-blue-500 animate-pulse" />
+              <p className="text-sm text-slate-400">Spectating Match</p>
+              <p className="text-xs text-slate-600 mt-1">You are watching {p1.name} vs {p2.name}</p>
+            </div>
+          ) : showSwitch ? (
+            <div className="text-center p-4 border border-blue-600/20 rounded-2xl bg-blue-600/5">
+              <p className="text-sm font-bold text-blue-400 mb-2">Select a Pokemon to Switch</p>
+              <p className="text-xs text-slate-500">Switching takes your turn!</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {activePlayerPoke.moves.map((move, i) => (
+            <div className="grid grid-cols-2 gap-2">
+              {displayActivePlayerPoke.moves.map((move, i) => (
                 <button
                   key={i}
                   onClick={() => onAttack(move)}
-                  disabled={!isMyTurn || isAuto}
+                  disabled={!isMyTurn}
                   className={cn(
-                    "relative group p-4 rounded-xl border transition-all flex flex-col items-start gap-1 overflow-hidden",
-                    isMyTurn && !isAuto 
-                      ? "bg-slate-800 border-slate-700 hover:border-blue-600 hover:bg-slate-700 active:scale-95" 
-                      : "bg-slate-900 border-slate-800 opacity-50 cursor-not-allowed"
+                    "p-3 rounded-xl border flex flex-col items-start gap-1 transition-all group relative overflow-hidden",
+                    isMyTurn ? "bg-slate-800 border-slate-700 hover:border-blue-500 hover:bg-slate-700 active:scale-95" : "bg-slate-900 border-slate-800 opacity-50 cursor-not-allowed"
                   )}
                 >
                   <div className="flex justify-between w-full items-center">
-                    <span className="text-xs font-bold uppercase tracking-wider truncate max-w-[80%]">{move.name.replace('-', ' ')}</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider truncate max-w-[70%]">{move.name.replace('-', ' ')}</span>
                     <TypeBadge type={move.type} className="scale-75 origin-right" />
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
-                    <Sword size={10} /> PWR: {move.power}
+                  <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500">
+                    <Sword size={8} /> PWR: {move.power}
                   </div>
-                  {isMyTurn && !isAuto && (
-                    <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  )}
+                  {isMyTurn && <div className="absolute inset-0 bg-blue-600/5 opacity-0 group-hover:opacity-100 transition-opacity" />}
                 </button>
               ))}
             </div>

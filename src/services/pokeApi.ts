@@ -1,6 +1,26 @@
-import { Pokemon, PokemonSummary } from '../types';
+import { Pokemon, PokemonSummary, Move } from '../types';
 
 const BASE_URL = 'https://pokeapi.co/api/v2';
+
+async function fetchMoves(moveUrls: string[]): Promise<Move[]> {
+  const detailedMoves = await Promise.all(
+    moveUrls.slice(0, 4).map(async (url) => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        return {
+          name: data.name,
+          power: data.power || 40, // Default power if not specified
+          type: data.type.name
+        };
+      } catch (e) {
+        return null;
+      }
+    })
+  );
+  return detailedMoves.filter((m): m is Move => m !== null);
+}
 
 export async function fetchPokemonList(offset: number = 0, limit: number = 20): Promise<PokemonSummary[]> {
   try {
@@ -12,25 +32,9 @@ export async function fetchPokemonList(offset: number = 0, limit: number = 20): 
       try {
         const res = await fetch(p.url);
         if (!res.ok) return null;
-        const details: Pokemon = await res.json();
+        const details: Pokemon & { moves: { move: { url: string } }[] } = await res.json();
+        const moves = await fetchMoves(details.moves.map(m => m.move.url));
         
-        // Fetch 4 moves
-        const moves = await Promise.all(
-          details.moves.slice(0, 4).map(async (m: any) => {
-            try {
-              const moveRes = await fetch(m.move.url);
-              const moveDetails = await moveRes.json();
-              return {
-                name: m.move.name,
-                power: moveDetails.power || 40,
-                type: moveDetails.type.name
-              };
-            } catch (e) {
-              return { name: m.move.name, power: 40, type: details.types[0].type.name };
-            }
-          })
-        );
-
         return {
           id: details.id,
           name: details.name,
@@ -62,25 +66,9 @@ export async function fetchPokemonByNameOrId(nameOrId: string): Promise<PokemonS
   try {
     const res = await fetch(`${BASE_URL}/pokemon/${nameOrId.toLowerCase()}`);
     if (!res.ok) return null;
-    const details: Pokemon = await res.json();
+    const details: Pokemon & { moves: { move: { url: string } }[] } = await res.json();
+    const moves = await fetchMoves(details.moves.map(m => m.move.url));
     
-    // Fetch 4 moves
-    const moves = await Promise.all(
-      details.moves.slice(0, 4).map(async (m: any) => {
-        try {
-          const moveRes = await fetch(m.move.url);
-          const moveDetails = await moveRes.json();
-          return {
-            name: m.move.name,
-            power: moveDetails.power || 40,
-            type: moveDetails.type.name
-          };
-        } catch (e) {
-          return { name: m.move.name, power: 40, type: details.types[0].type.name };
-        }
-      })
-    );
-
     return {
       id: details.id,
       name: details.name,
