@@ -402,10 +402,13 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'index.html'));
-    });
+   app.use(express.static(__dirname));
+
+app.get('*', (req, res, next) => {
+  if (req.path.includes('.')) return next();
+
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
