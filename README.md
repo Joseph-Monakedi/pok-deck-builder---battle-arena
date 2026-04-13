@@ -1,20 +1,52 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# PokéDeck Builder & Battle Arena
 
-# Run and deploy your AI Studio app
+> **This project is 100% vibe coded with Google AI Studio.**
 
-This contains everything you need to run your app locally.
+A high-performance Pokémon deck builder and real-time multiplayer battle arena built with React, Vite, Tailwind CSS, and Socket.io.
 
-View your app in AI Studio: https://ai.studio/apps/96e0c792-957c-4650-a72f-0b7cb18e8709
+## 🚀 Live Demo
+Check out the deployed game here: [https://pok-deck-builder-battle-arena.onrender.com/](https://pok-deck-builder-battle-arena.onrender.com/)
 
-## Run Locally
+## 📸 Screenshots
 
-**Prerequisites:**  Node.js
+### Deck Builder
+Build your ultimate team of 6 Pokémon using data from the PokéAPI.
+![Deck Builder](https://picsum.photos/seed/pokemon-deck/800/450)
 
+### Battle Arena
+Engage in real-time tactical battles with other trainers or test your skills against a CPU.
+![Battle Arena](https://picsum.photos/seed/pokemon-battle/800/450)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Multiplayer Lobby
+Challenge friends, join the queue for random matchmaking, or spectate ongoing matches.
+![Lobby](https://picsum.photos/seed/pokemon-lobby/800/450)
+
+## ✨ Features
+
+- **Real-time Multiplayer**: Powered by Socket.io for low-latency battles.
+- **Dynamic Deck Building**: Search and add any Pokémon from the national dex.
+- **Tactical Combat**: Type effectiveness, move power, and stats-based damage calculation.
+- **Spectator Mode**: Watch live battles between other trainers.
+- **CPU Battle**: Practice your strategies against an AI opponent.
+- **Auto-Battle**: Toggle AI control for your own Pokémon during matches.
+
+## 🛠️ Tech Stack
+
+- **Frontend**: React 18, Vite, Tailwind CSS, Framer Motion, Lucide React.
+- **Backend**: Node.js, Express, Socket.io.
+- **API**: [PokéAPI](https://pokeapi.co/) for comprehensive Pokémon data.
+
+## 📦 Installation
+
+1. Clone the repository.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+## 📜 License
+MIT
